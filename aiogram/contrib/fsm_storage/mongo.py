@@ -5,6 +5,7 @@ This module has mongo storage for finite-state machine
 
 from typing import Union, Dict, Optional, List, Tuple, AnyStr
 
+from environs import Env
 
 try:
     import pymongo
@@ -17,9 +18,17 @@ except ModuleNotFoundError as e:
 
 from ...dispatcher.storage import BaseStorage
 
-STATE = 'aiogram_state'
-DATA = 'aiogram_data'
-BUCKET = 'aiogram_bucket'
+env = Env()
+env.read_env()
+
+PREFIX = env.str("MONGO_DB_PREFIX", default="")
+
+if PREFIX:
+    PREFIX += "_"
+
+STATE = f"{PREFIX}fsm_state"
+DATA = f"{PREFIX}fsm_data"
+BUCKET = f"{PREFIX}fsm_bucket"
 COLLECTIONS = (STATE, DATA, BUCKET)
 
 
