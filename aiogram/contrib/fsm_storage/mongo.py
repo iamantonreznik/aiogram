@@ -5,8 +5,6 @@ This module has mongo storage for finite-state machine
 
 from typing import Union, Dict, Optional, List, Tuple, AnyStr
 
-from environs import Env
-
 try:
     import pymongo
     import motor
@@ -17,19 +15,6 @@ except ModuleNotFoundError as e:
     raise e
 
 from ...dispatcher.storage import BaseStorage
-
-env = Env()
-env.read_env()
-
-PREFIX = env.str("MONGO_DB_PREFIX", default="")
-
-if PREFIX:
-    PREFIX += "_"
-
-STATE = f"{PREFIX}fsm_state"
-DATA = f"{PREFIX}fsm_data"
-BUCKET = f"{PREFIX}fsm_bucket"
-COLLECTIONS = (STATE, DATA, BUCKET)
 
 
 class MongoStorage(BaseStorage):
@@ -52,13 +37,18 @@ class MongoStorage(BaseStorage):
     """
 
     def __init__(self, host='localhost', port=27017, db_name='aiogram_fsm', uri=None,
-                 username=None, password=None, index=True, **kwargs):
+                 username=None, password=None, index=True, prefix=None, **kwargs):
         self._host = host
         self._port = port
         self._db_name: str = db_name
         self._uri = uri
         self._username = username
         self._password = password
+        self._state = f"{prefix + '_' if prefix else ''}fsm_state"
+        self._data = f"{prefix + '_' if prefix else ''}fsm_data"
+        self._bucket = f"{prefix + '_' if prefix else ''}fsm_bucket"
+        self._collections = (self._state, self._data, self._bucket)
+
         self._kwargs = kwargs  # custom client options like SSL configuration, etc.
 
         self._mongo: Optional[AsyncIOMotorClient] = None
@@ -112,7 +102,7 @@ class MongoStorage(BaseStorage):
 
     @staticmethod
     async def apply_index(db):
-        for collection in COLLECTIONS:
+        for collection in self._collections:
             await db[collection].create_index(keys=[('chat', 1), ('user', 1)],
                                               name="chat_user_idx", unique=True, background=True)
 
@@ -131,9 +121,9 @@ class MongoStorage(BaseStorage):
         db = await self.get_db()
 
         if state is None:
-            await db[STATE].delete_one(filter={'chat': chat, 'user': user})
+            await db[self._state].delete_one(filter={'chat': chat, 'user': user})
         else:
-            await db[STATE].update_one(
+            await db[self._state].update_one(
                 filter={'chat': chat, 'user': user},
                 update={'$set': {'state': self.resolve_state(state)}},
                 upsert=True,
@@ -143,7 +133,7 @@ class MongoStorage(BaseStorage):
                         default: Optional[str] = None) -> Optional[str]:
         chat, user = self.check_address(chat=chat, user=user)
         db = await self.get_db()
-        result = await db[STATE].find_one(filter={'chat': chat, 'user': user})
+        result = await db[self._state].find_one(filter={'chat': chat, 'user': user})
 
         return result.get('state') if result else self.resolve_state(default)
 
@@ -152,16 +142,16 @@ class MongoStorage(BaseStorage):
         chat, user = self.check_address(chat=chat, user=user)
         db = await self.get_db()
         if not data:
-            await db[DATA].delete_one(filter={'chat': chat, 'user': user})
+            await db[self._data].delete_one(filter={'chat': chat, 'user': user})
         else:
-            await db[DATA].update_one(filter={'chat': chat, 'user': user},
+            await db[self._data].update_one(filter={'chat': chat, 'user': user},
                                       update={'$set': {'data': data}}, upsert=True)
 
     async def get_data(self, *, chat: Union[str, int, None] = None, user: Union[str, int, None] = None,
                        default: Optional[dict] = None) -> Dict:
         chat, user = self.check_address(chat=chat, user=user)
         db = await self.get_db()
-        result = await db[DATA].find_one(filter={'chat': chat, 'user': user})
+        result = await db[self._data].find_one(filter={'chat': chat, 'user': user})
 
         return result.get('data') if result else default or {}
 
@@ -180,7 +170,7 @@ class MongoStorage(BaseStorage):
                          default: Optional[dict] = None) -> Dict:
         chat, user = self.check_address(chat=chat, user=user)
         db = await self.get_db()
-        result = await db[BUCKET].find_one(filter={'chat': chat, 'user': user})
+        result = await db[self._bucket].find_one(filter={'chat': chat, 'user': user})
         return result.get('bucket') if result else default or {}
 
     async def set_bucket(self, *, chat: Union[str, int, None] = None, user: Union[str, int, None] = None,
@@ -188,7 +178,7 @@ class MongoStorage(BaseStorage):
         chat, user = self.check_address(chat=chat, user=user)
         db = await self.get_db()
 
-        await db[BUCKET].update_one(filter={'chat': chat, 'user': user},
+        await db[self._bucket].update_one(filter={'chat': chat, 'user': user},
                                     update={'$set': {'bucket': bucket}}, upsert=True)
 
     async def update_bucket(self, *, chat: Union[str, int, None] = None,
@@ -209,11 +199,11 @@ class MongoStorage(BaseStorage):
         """
         db = await self.get_db()
 
-        await db[STATE].drop()
+        await db[self._state].drop()
 
         if full:
-            await db[DATA].drop()
-            await db[BUCKET].drop()
+            await db[self._data].drop()
+            await db[self._bucket].drop()
 
     async def get_states_list(self) -> List[Tuple[int, int]]:
         """
@@ -222,5 +212,5 @@ class MongoStorage(BaseStorage):
         :return: list of tuples where first element is chat id and second is user id
         """
         db = await self.get_db()
-        items = await db[STATE].find().to_list(length=None)
+        items = await db[self._state].find().to_list(length=None)
         return [(int(item['chat']), int(item['user'])) for item in items]
