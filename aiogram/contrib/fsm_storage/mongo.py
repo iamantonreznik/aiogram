@@ -97,12 +97,12 @@ class MongoStorage(BaseStorage):
         self._db = mongo.get_database(self._db_name)
 
         if self._index:
-            await self.apply_index(self._db)
+            await self.apply_index(self._db, self._collections)
         return self._db
 
     @staticmethod
-    async def apply_index(db):
-        for collection in self._collections:
+    async def apply_index(db, collections):
+        for collection in collections:
             await db[collection].create_index(keys=[('chat', 1), ('user', 1)],
                                               name="chat_user_idx", unique=True, background=True)
 
